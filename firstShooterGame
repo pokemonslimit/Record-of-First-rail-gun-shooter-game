@@ -1,0 +1,1646 @@
+#ifdef _MSC_VER
+// We'll also define this to stop MSVC complaining about sprintf().
+#define _CRT_SECURE_NO_WARNINGS
+#pragma comment(lib, "Irrlicht.lib")
+#pragma comment(lib, "irrKlang.lib")
+#endif
+
+#include <irrlicht.h>
+#include <cmath>
+#include <iostream>
+#include <fstream>
+#include <ctime>
+#include <irrKlang.h>
+#include "Interface.h"
+
+
+using namespace irr;
+using namespace std;
+using namespace irrklang;
+
+bool blood[25], bullet[25];
+double timer = 0;
+bool playerhp[5];
+bool bosscheck = 1;
+int bulletnumber = 25;
+
+
+enum
+{
+	// I use this ISceneNode ID to indicate a scene node that is
+	// not pickable by getSceneNodeAndCollisionPointFromRay()
+	ID_IsNotPickable = 0,
+
+	// I use this flag in ISceneNode IDs to indicate that the
+	// scene node can be picked by ray selection.
+	IDFlag_IsPickable = 1 << 0,
+
+	// I use this flag in ISceneNode IDs to indicate that the
+	// scene node can be highlighted.  In this example, the
+	// homonids can be highlighted, but the level mesh can't.
+	IDFlag_IsHighlightable = 1 << 1
+};
+
+class HotKeyReceiver : public IEventReceiver
+{
+public:
+	// We'll create a struct to record info on the mouse state
+	struct SMouseState
+	{
+		core::position2di Position;
+		bool LeftButtonDown;
+		bool RightButtonDown;
+		SMouseState() : LeftButtonDown(false), RightButtonDown(false) { }
+	} MouseState;
+
+	// This is the one method that we have to implement
+	virtual bool OnEvent(const SEvent& event)
+	{
+		// Remember whether each key is down or up
+		if (event.EventType == irr::EET_KEY_INPUT_EVENT)
+			KeyIsDown[event.KeyInput.Key] = event.KeyInput.PressedDown;
+
+		// Remember the mouse state
+		if (event.EventType == irr::EET_MOUSE_INPUT_EVENT)
+		{
+			switch (event.MouseInput.Event)
+			{
+			case EMIE_LMOUSE_PRESSED_DOWN:
+				MouseState.LeftButtonDown = true;
+				break;
+
+			case EMIE_LMOUSE_LEFT_UP:
+				MouseState.LeftButtonDown = false;
+				break;
+			case EMIE_RMOUSE_PRESSED_DOWN:
+				MouseState.RightButtonDown = true;
+				break;
+
+			case EMIE_RMOUSE_LEFT_UP:
+				MouseState.RightButtonDown = false;
+				break;
+
+			case EMIE_MOUSE_MOVED:
+				MouseState.Position.X = event.MouseInput.X;
+				MouseState.Position.Y = event.MouseInput.Y;
+				break;
+
+			default:
+				// We won't use the wheel
+				break;
+			}
+		}
+
+
+		return false;
+	}
+
+	const SMouseState & GetMouseState(void) const
+	{
+		return MouseState;
+	}
+
+	// This is used to check whether a key is being held down
+	virtual bool IsKeyDown(EKEY_CODE keyCode) const
+	{
+		return KeyIsDown[keyCode];
+	}
+
+	HotKeyReceiver()
+	{
+		for (u32 i = 0; i<KEY_KEY_CODES_COUNT; ++i)
+			KeyIsDown[i] = false;
+	}
+
+private:
+	// We use this array to store the current state of each key
+	bool KeyIsDown[KEY_KEY_CODES_COUNT];
+};
+
+class Creature{
+public:
+	virtual void PainPlayer(IrrlichtDevice* device, video::IVideoDriver  *driver, ISoundEngine *engine){
+
+	}
+	virtual void Pain(IrrlichtDevice *device, video::IVideoDriver  *driver, scene::ISceneManager *smgr, scene::ITriangleSelector* selector){
+
+	}
+	virtual void Attack(Creature *creature, scene::ICameraSceneNode* camera, IrrlichtDevice* device, video::IVideoDriver  *driver){
+
+	}
+
+	virtual void Movement(){
+
+	}
+
+};
+
+class Boss :public Creature{
+public:
+	Boss(){};
+	Boss(video::IVideoDriver  *driver, scene::ISceneManager *smgr, scene::ITriangleSelector* selector, core::vector3df Boss_pos){
+		for (int i = 0; i < 68; i++)HP[i] = 1;
+		Boss_node = 0;
+		attack_judge = 0;
+		Boss_mesh = smgr->getMesh("\game/fatso.md2");
+		Boss_node = smgr->addAnimatedMeshSceneNode(Boss_mesh);
+		if (Boss_node)
+		{
+			Boss_node->setPosition(Boss_pos);
+			Boss_node->setMaterialFlag(video::EMF_LIGHTING, false);
+			Boss_node->setFrameLoop(0, 30);
+			Boss_node->setAnimationSpeed(50);
+			Boss_node->setScale(core::vector3df(2.f, 2.f, 2.f));
+			Boss_node->setMaterialTexture(0, driver->getTexture("\game/fatso.jpg"));
+			selector = smgr->createTriangleSelector(Boss_node);
+			Boss_node->setTriangleSelector(selector);
+			selector->drop(); // We're done with this selector, so drop it now.
+		}
+	}
+	virtual void Movement(scene::ICameraSceneNode* camera){}
+	virtual void Attack(Creature *creature, scene::ICameraSceneNode* camera, IrrlichtDevice* device, video::IVideoDriver  *driver, HotKeyReceiver receiver){
+		if (Boss_node)
+		{
+			Boss_node->setMaterialTexture(0, driver->getTexture("\game/fatsofire.jpg"));
+			irr::io::path W = "\game/W.png";
+			irr::io::path A = "\game/A.png";
+			irr::io::path S = "\game/S.png";
+			irr::io::path D = "\game/D.png";
+			irr::io::path WW = "\game/WW.png";
+			irr::io::path AA = "\game/AA.png";
+			irr::io::path SS = "\game/SS.png";
+			irr::io::path DD = "\game/DD.png";
+			static u32 Attack_time = 0;
+			static int QTEattack = 0;
+			static u32 QTE_time = 0;
+			if (Attack_time == 0){
+				Attack_time = GetTime(device);
+				if (attack_judge == 0){
+					srand(time(0));
+					number = rand() % 3 + 1;
+					QTE = new int[number];
+					QTE_judge = new int[number];
+
+					for (int i = 0; i < number; i++) {
+						QTE[i] = rand() % 4 + 1;
+						QTE_judge[i] = 0;
+					}
+				}
+			}
+			if (GetTime(device) <= Attack_time + 1200 && GetTime(device) >= Attack_time) {
+				for (int i = 0; i < number; i++) {
+					switch (QTE[i]){
+					case 1:
+						if (QTE_judge[i] == 0){
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(W),
+								core::position2d<s32>(200 + 150 * i, 350));
+						}
+						else if (QTE_judge[i] == 1) {
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(WW),
+								core::position2d<s32>(200 + 150 * i, 350));
+						}
+						break;
+					case 2:
+						if (QTE_judge[i] == 0){
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(A),
+								core::position2d<s32>(200 + 150 * i, 350));
+						}
+						else if (QTE_judge[i] == 1) {
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(AA),
+								core::position2d<s32>(200 + 150 * i, 350));
+							break;
+						}
+						break;
+					case 3:
+						if (QTE_judge[i] == 0){
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(S),
+								core::position2d<s32>(200 + 150 * i, 350));
+						}
+						else if (QTE_judge[i] == 1) {
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(SS),
+								core::position2d<s32>(200 + 150 * i, 350));
+							break;
+						}
+						break;
+					case 4:
+						if (QTE_judge[i] == 0){
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(D),
+								core::position2d<s32>(200 + 150 * i, 350));
+						}
+						else if (QTE_judge[i] == 1) {
+							device->getGUIEnvironment()->addImage(
+								driver->getTexture(DD),
+								core::position2d<s32>(200 + 150 * i, 350));
+							break;
+						}
+						break;
+					}
+				}
+				// clear WASD
+				//if (QTE_time == 0) QTE_time = GetTime(device);
+
+				if (QTE[QTEattack] != 0){
+					switch (QTE[QTEattack]) {
+					case 1:
+						if (receiver.IsKeyDown(irr::KEY_KEY_W)){
+							QTE_judge[QTEattack] = 1;
+							QTE[QTEattack] = 0;
+						}
+						break;
+					case 2:
+						if (receiver.IsKeyDown(irr::KEY_KEY_A)){
+							QTE_judge[QTEattack] = 1;
+							QTE[QTEattack] = 0;
+						}
+						break;
+					case 3:
+						if (receiver.IsKeyDown(irr::KEY_KEY_S)){
+							QTE_judge[QTEattack] = 1;
+							QTE[QTEattack] = 0;
+						}
+						break;
+					case 4:
+						if (receiver.IsKeyDown(irr::KEY_KEY_D)){
+							QTE_judge[QTEattack] = 1;
+							QTE[QTEattack] = 0;
+						}
+						break;
+					}
+					if (QTE[QTEattack] != 0) {
+						//if (GetTime(device) >= QTE_time + 200){ QTE_time = 0; }
+					}
+					else if (QTE[QTEattack] == 0) {
+						if (QTE_time == 0) QTE_time = GetTime(device);
+						if (GetTime(device) >= QTE_time + 200){
+							QTEattack++;
+							QTE_time = 0;
+						}
+					}
+					if (QTE[number - 1] == 0) {
+						attack_judge = 0;
+					}
+					else attack_judge = 1;
+				}
+				else if (QTE[QTEattack] == 0) {
+					if (GetTime(device) >= QTE_time + 200){
+						if (QTEattack < number) QTEattack++;
+						QTE_time = 0;
+					}
+					if (QTE[number - 1] == 0) {
+						attack_judge = 0;
+					}
+					else attack_judge = 1;
+				}
+			}
+
+
+			if (GetTime(device) >= Attack_time + 1200)
+			{
+				if (attack_judge == 1) {
+					video::ITexture *hurt2 = driver->getTexture("\game/hurt2.png");
+					device->getGUIEnvironment()->addImage(hurt2, core::position2d<s32>(200, 100));
+					if (GetTime(device) >= Attack_time + 1400)
+					{
+						creature->PainPlayer(device, driver, engine);
+						device->getGUIEnvironment()->clear();
+						Attack_time = 0;
+						attack_judge = 0;
+						delete[]QTE;
+						delete[]QTE_judge;
+						QTEattack = 0;
+					}
+				}
+				else {
+					delete[]QTE;
+					delete[]QTE_judge;
+					Attack_time = 0;
+					QTEattack = 0;
+				}
+			}
+
+
+
+		}
+
+	}
+
+	virtual void Pain(IrrlichtDevice* device, video::IVideoDriver  *driver){
+		int i = GetHP();
+		static u32 Pain_time = 0;
+		if (Pain_time == 0)
+			Pain_time = GetTime(device);
+		if (GetTime(device) >= Pain_time + 100)
+		{
+			HP[i - 1] = 0;
+			Pain_time = 0;
+		}
+
+	}
+	void setRotation(scene::ICameraSceneNode* camera){
+		core::vector3df Zombie_pos = Boss_node->getPosition();
+		core::vector3df Player_pos = camera->getPosition();
+		core::vector3df Zombie_rot = Boss_node->getRotation();
+		core::vector3df Zombie_vec = Player_pos - Zombie_pos;
+		Zombie_rot.Y = atan(Zombie_vec.Z / Zombie_vec.X) * (180.0f / core::PI);
+		if ((Player_pos.X - Zombie_pos.X) > 0){
+			Zombie_rot.Y = 90 - Zombie_rot.Y;
+		}
+		else if ((Player_pos.X - Zombie_pos.X) < 0){
+			Zombie_rot.Y = -90 - Zombie_rot.Y;
+		}
+		Zombie_rot.Y -= 90;
+		Boss_node->setRotation(Zombie_rot);
+	}
+	int GetHP(){
+		int count = 0;
+		for (int i = 0; i < 68; i++)
+		{
+			if (HP[i] == 1)
+				count++;
+		}
+		return count;
+	}
+	void ShowHP(IrrlichtDevice* device, video::IVideoDriver  *driver){
+		//device->getGUIEnvironment()->clear();
+		//the bloodframe
+		device->getGUIEnvironment()->addImage(
+			driver->getTexture("\game/bosshpbar2.png"),
+			core::position2d<s32>(10, 10));
+		//blood
+		for (int i = 0; i < 68; i++) {
+			if (HP[i] == 1) {
+				device->getGUIEnvironment()->addImage(
+					driver->getTexture("\game/bosshp2.png"),
+					core::position2d<s32>(26 + 5 * i, 26));
+			}
+		}
+	}
+	void Die(IrrlichtDevice *device){
+
+		if (HP[0] == 0)
+		{
+			Boss_node->setFrameLoop(0, 23);
+		}
+
+	}
+	core::vector3df getPosition(){
+		return Boss_node->getPosition();
+	}
+	u32 GetTime(IrrlichtDevice* device){
+		boss_time = device->getTimer()->getTime();
+		return boss_time;
+	}
+	~Boss(){
+		Boss_node->remove();
+	}
+private:
+	scene::IAnimatedMesh *Boss_mesh;
+	scene::ISceneNodeAnimator* Boss_anim;
+	scene::IAnimatedMeshSceneNode* Boss_node;
+	ISoundEngine *engine;
+	char ID;
+	bool HP[68], attack_judge;
+	u32	boss_time;
+	int dodge;
+	int *QTE, *QTE_judge;
+	int number;
+};
+
+class Zombie :public Creature{
+public:
+	Zombie(){};
+	Zombie(video::IVideoDriver  *driver, scene::ISceneManager *smgr, scene::ITriangleSelector* selector, core::vector3df zombie_pos, IMeshSceneNode* q3node){
+		HP = 15;
+		Zombie_node = 0;
+		state = 0;
+		pathfind = 0;
+		Zombie_mesh = smgr->getMesh("\game/Imp.md2");
+		Zombie_node = smgr->addAnimatedMeshSceneNode(Zombie_mesh);
+		if (Zombie_node)
+		{
+			Zombie_node->setPosition(zombie_pos);
+			Zombie_node->setMaterialFlag(video::EMF_LIGHTING, false);
+			Zombie_node->setFrameLoop(0, 23);
+			Zombie_node->setAnimationSpeed(20);
+			Zombie_node->setScale(core::vector3df(0.9f, 0.9f, 0.9f));
+			Zombie_node->setMaterialTexture(0, driver->getTexture("\game/Imp.jpg"));
+			ITriangleSelector *selectorZombie = 0;
+			if (selector)
+			{
+				scene::ISceneNodeAnimator* anim_zombie = smgr->createCollisionResponseAnimator(
+					selector, Zombie_node, core::vector3df(10, 20, 10),
+					core::vector3df(0, -10, 0), core::vector3df(0, 0, 0));
+				Zombie_node->addAnimator(anim_zombie);
+				anim_zombie->drop();  // And likewise, drop the animator when we're done referring to it.
+			}
+			selectorZombie = smgr->createTriangleSelector(Zombie_node);
+			Zombie_node->setTriangleSelector(selectorZombie);
+			// We're done with this selector, so drop it now.
+		}
+
+	}
+
+	virtual void Movement(scene::ICameraSceneNode* camera){
+
+		core::vector3df Zombie_pos = Zombie_node->getPosition();
+		core::vector3df Player_pos = camera->getPosition();
+		core::vector3df Zombie_rot = Zombie_node->getRotation();
+		core::vector3df Zombie_vec = Player_pos - Zombie_pos;
+
+		core::vector3df pre_pos = Zombie_pos;
+
+		Zombie_rot.Y = atan(Zombie_vec.Z / Zombie_vec.X) * (180.0f / core::PI);
+		if ((Player_pos.X - Zombie_pos.X) > 0){
+			Zombie_rot.Y = 90 - Zombie_rot.Y;
+		}
+		else if ((Player_pos.X - Zombie_pos.X) < 0){
+			Zombie_rot.Y = -90 - Zombie_rot.Y;
+		}
+		Zombie_rot.Y -= 90;
+		if (pathfind == 1) {
+			Zombie_rot.Y -= 90;
+		}
+		else if (pathfind == 2) {
+			Zombie_rot.Y += 90;
+		}
+		Zombie_node->setRotation(Zombie_rot);
+		core::vector3df Zombie_direction = (Player_pos - Zombie_pos).normalize();
+		if ((Player_pos - Zombie_pos).getLength() > 80)
+		{
+			Zombie_direction.Y = 0;
+			Zombie_direction.normalize();
+			Zombie_node->setPosition(Zombie_node->getPosition() + Zombie_direction*0.3);
+
+
+		}
+		if ((Zombie_pos - pre_pos).getLength() < 0.5) {
+			if (pathfind == 0) pathfind = 1;
+			else if (pathfind == 1) pathfind = 2;
+		}
+		else pathfind = 0;
+		if (pathfind == 1) {
+			Zombie_rot.Y += 90;
+		}
+		else if (pathfind == 2) {
+			Zombie_rot.Y -= 90;
+		}
+		Zombie_node->setRotation(Zombie_rot);
+
+	};
+
+	virtual void Attack(Creature *creature, scene::ICameraSceneNode* camera, IrrlichtDevice* device, video::IVideoDriver  *driver){
+		core::vector3df Zombie_pos = Zombie_node->getPosition();
+		core::vector3df Player_pos = camera->getPosition();
+		//f32 ZPDistance = sqrtf(pow(Zombie_pos.X - Player_pos.X, 2) + pow(Zombie_pos.Y - Player_pos.Y, 2) + pow(Zombie_pos.Z - Player_pos.Z, 2));
+		if (Zombie_node)
+		{
+			if ((Player_pos - Zombie_pos).getLength() <= 81)
+			{
+				static u32 Attack_time = 0;
+				
+				if (Attack_time == 0)
+					Attack_time = GetTime(device);
+				if (GetTime(device) >= Attack_time + 1000)
+				{
+					Zombie_node->setFrameLoop(25, 45);
+					Zombie_node->setAnimationSpeed(20);
+					video::ITexture *hurt = driver->getTexture("\game/hurt1.png");
+					device->getGUIEnvironment()->addImage(hurt, core::position2d<s32>(200, 100));
+
+					if (GetTime(device) >= Attack_time + 1200)
+					{
+						creature->PainPlayer(device, driver, engine);
+						device->getGUIEnvironment()->clear();
+						Attack_time = 0;
+					}
+				}
+			}
+
+		}
+	}
+	virtual void Pain(IrrlichtDevice* device, video::IVideoDriver  *driver){
+		if (Zombie_node)
+		{
+			static u32 Pain_time = 0;
+			if (Pain_time == 0)
+				Pain_time = GetTime(device);
+			if (GetTime(device) >= Pain_time + 200)
+			{
+				HP = HP - 3;
+				Pain_time = 0;
+			}
+			if (10 < HP&&HP <= 15){
+				Zombie_node->setMaterialTexture(0, driver->getTexture("\game/Impfire.jpg"));
+			}
+			else if (5 < HP&&HP <= 10){
+				Zombie_node->setMaterialTexture(0, driver->getTexture("\game/Impfire2.jpg"));
+			}
+			else if (0 < HP&&HP <= 5){
+				Zombie_node->setMaterialTexture(0, driver->getTexture("\game/Impfire3.jpg"));
+
+			}
+			else if (0 == HP)
+			{
+				Zombie_node->setFrameLoop(40, 80);
+				Zombie_node->setAnimationSpeed(20);
+			}
+		}
+
+	}
+	void heavyPain(IrrlichtDevice* device, video::IVideoDriver  *driver){
+		if (Zombie_node)
+		{
+			static u32 Pain_time = 0;
+			if (Pain_time == 0)
+				Pain_time = GetTime(device);
+			if (GetTime(device) >= Pain_time + 200)
+			{
+				HP = HP - 15;
+				Pain_time = 0;
+			}
+			if (10 < HP&&HP <= 15){
+				Zombie_node->setMaterialTexture(0, driver->getTexture("\game/Impfire.jpg"));
+			}
+			else if (5 < HP&&HP <= 10){
+				Zombie_node->setMaterialTexture(0, driver->getTexture("\game/Impfire2.jpg"));
+			}
+			else if (0 < HP&&HP <= 5){
+				Zombie_node->setMaterialTexture(0, driver->getTexture("\game/Impfire3.jpg"));
+
+			}
+
+			else if (0 == HP)
+			{
+				Zombie_node->setFrameLoop(40, 80);
+				Zombie_node->setAnimationSpeed(20);
+			}
+
+		}
+
+	}
+	int GetHP(){
+		return HP;
+	}
+	scene::IAnimatedMeshSceneNode* getZombieNode(){
+		return Zombie_node;
+	}
+	int GetAttack(){}
+
+	core::vector3df getPosition(){
+		return Zombie_node->getPosition();
+	}
+	int State()
+	{
+		return state;
+	}
+	u32 GetTime(IrrlichtDevice* device){
+		time = device->getTimer()->getTime();
+		return time;
+	}
+	~Zombie(){
+		Zombie_node->remove();
+	}
+
+private:
+	scene::IAnimatedMesh *Zombie_mesh;
+	scene::IAnimatedMeshSceneNode* Zombie_node;
+	ISoundEngine *engine;
+	int HP;
+	int state;
+	int attack;
+	int pathfind;
+	u32 time;
+};
+
+class Spawner{
+public:
+	Spawner(){};
+	Spawner(IrrlichtDevice* device, video::IVideoDriver  *driver, scene::ISceneManager *smgr, scene::ITriangleSelector* selector, core::vector3df Spawner_pos, int amount, int length, IMeshSceneNode* q3node)
+	{
+		// u32 Spawner_time = device->getTimer()->getTime();
+		srand(time(0));
+		number = amount;
+		zombie = new Zombie*[amount];
+		for (int i = 0; i < amount; i++)
+		{
+			Spawner_pos.X += rand() % length;
+			Spawner_pos.Z += rand() % length;
+			zombie[i] = new Zombie(driver, smgr, selector, Spawner_pos, q3node);
+		}
+
+	}
+	Zombie *getZombie(int i){
+		return zombie[i];
+	}
+	void deleteZombie(int i){
+		zombie[i] = NULL;
+	}
+	scene::IAnimatedMeshSceneNode* getZombieNode(int i) {
+		return zombie[i]->getZombieNode();
+	}
+	void ZombieAttack(Spawner *spawner, Creature *creature, scene::ICameraSceneNode* camera, IrrlichtDevice* device, video::IVideoDriver  *driver){}
+	~Spawner() {
+		for (int i = 0; i < number; i++) {
+			delete zombie[i];
+		}
+		delete[]zombie;
+	}
+private:
+	Zombie **zombie;
+	int number;
+
+};
+
+class Player :public Creature{
+public:
+	Player(){
+		for (int i = 0; i < 5; i++)HP[i] = 1;
+	}
+	u32 GetTime(IrrlichtDevice* device){
+		time = device->getTimer()->getTime();
+		return time;
+	}
+	virtual void PainPlayer(IrrlichtDevice* device, video::IVideoDriver  *driver, ISoundEngine* engine){
+
+		engine = createIrrKlangDevice();
+		video::ITexture *hurt = driver->getTexture("\game/hurt1.png");
+		device->getGUIEnvironment()->addImage(hurt, core::position2d<s32>(200, 100));
+		engine->play2D("\game/HURT.wav");
+		int i = GetHP();
+		HP[i - 1] = 0;
+		//device->getGUIEnvironment()->clear();
+
+	}
+
+	int GetHP(){
+		int count = 0;
+		for (int i = 0; i < 5; i++)
+		{
+			if (HP[i] == 1)
+				count++;
+		}
+		return count;
+	}
+	void ShowHP(IrrlichtDevice* device, video::IVideoDriver  *driver){
+		device->getGUIEnvironment()->clear();
+		for (int i = 0; i < 5; i++){
+			if (HP[i] == 1) {
+				device->getGUIEnvironment()->addImage(
+					driver->getTexture("\game/hp2.png"),
+					core::position2d<s32>(720 - 30 * i, 540));
+			}
+
+		}
+	}
+	void Die(IrrlichtDevice *device){
+
+		if (HP[0] == 0)
+		{
+			device->closeDevice();
+		}
+
+	}
+	//
+	//void GetWeapon()
+private:
+	bool HP[5];
+	u32 time;
+};
+
+void Movement(IrrlichtDevice* device, HotKeyReceiver receiver, scene::ICameraSceneNode* camera, const f32 frameDeltaTime, scene::ISceneNode * selectedSceneNode, ILogger* logger);
+void Shot(HotKeyReceiver receiver, ISoundEngine* engine, const f32 frameDeltaTime, core::vector3df intersection, scene::IParticleSystemSceneNode* ps, scene::IParticleEmitter* em, scene::IParticleEmitter* em2, scene::IParticleAffector* paf);
+core::vector3df getXYDirection(core::vector3df start, core::vector3df end);
+core::vector3df targetRotateToRight(core::vector3df Target, core::vector3df direction);
+core::vector3df targetRotateToLeft(core::vector3df Target, core::vector3df direction);
+int route(IrrlichtDevice* device, HotKeyReceiver receiver, scene::ICameraSceneNode* camera, char* route, int length);
+void attackAI(Spawner* spawner, core::vector3df intersection, scene::ISceneNode * selectedSceneNode, Player *player, scene::ICameraSceneNode* camera,
+	IrrlichtDevice *device, video::IVideoDriver  *driver, video::SMaterial material, core::triangle3df hitTriangle, HotKeyReceiver hotkey,
+	scene::ISceneManager *smgr, scene::ITriangleSelector* selector_zombie, int number);
+void attackAIOfBoss(Boss* boss, core::vector3df intersection, scene::ISceneNode * selectedSceneNode, Player *player, scene::ICameraSceneNode* camera,
+	IrrlichtDevice *device, video::IVideoDriver  *driver, video::SMaterial material, core::triangle3df hitTriangle, HotKeyReceiver hotkey,
+	scene::ISceneManager *smgr, scene::ITriangleSelector* selector_zombie);
+
+int main()
+{
+	//
+	for (int i = 0; i < 5; i++) {
+		playerhp[i] = 1;
+	}
+	HotKeyReceiver hotkey;
+	//set driver type
+	IrrlichtDevice *device = createDevice(video::E_DRIVER_TYPE::EDT_DIRECT3D9,
+		core::dimension2du(800, 600),
+		32, false, false, false, &hotkey);
+	if (!device)
+		return 1;
+
+	//get the driver
+	video::IVideoDriver  *driver = device->getVideoDriver();    // 取得影像驅動器: 管理底層的 3D API 處理函式庫。
+	scene::ISceneManager *smgr = device->getSceneManager();   // 取得場景管理器: 管理場景中的 Mesh, Node, Camera 等等...
+	ISoundEngine* engine = createIrrKlangDevice();
+	NewInterface start;
+	start.runInterface();
+	if (start.get_receiver()->get_new_game() == 0)
+	{
+		start.get_device()->drop();
+		return 0;
+	}
+	// Loads in our map.
+	device->getFileSystem()->addFileArchive("\game/map-20kdm2.pk3");
+	scene::IAnimatedMesh* q3levelmesh = smgr->getMesh("20kdm2.bsp");
+	scene::IMeshSceneNode* q3node = 0;
+	// The Quake mesh is pickable, but doesn't get highlighted.
+	if (q3levelmesh)
+		q3node = smgr->addOctreeSceneNode(q3levelmesh->getMesh(0), 0, IDFlag_IsPickable);
+
+	scene::ITriangleSelector* selector_wall = 0;
+
+	if (q3node)
+	{
+		q3node->setPosition(core::vector3df(-1350, -130, -1400));
+
+		selector_wall = smgr->createOctreeTriangleSelector(
+			q3node->getMesh(), q3node, 128);
+		q3node->setTriangleSelector(selector_wall);
+		// We're not done with this selector yet, so don't drop it.
+	}
+
+	// Set a jump speed of 3 units per second, which gives a fairly realistic jump
+	// when used with the gravity of (0, -10, 0) in the collision response animator.
+	scene::ICameraSceneNode* camera = smgr->addCameraSceneNode();//FPS(0, 100.0f, .3f, ID_IsNotPickable, 0, 0, true, 3.f);
+	camera->setPosition(core::vector3df(50, 50, -60));
+	camera->setTarget(core::vector3df(-70, 30, -60));
+	//camera->bindTargetAndRotation(true);
+	/*
+	scene::IAnimatedMeshSceneNode* Gun = smgr->addAnimatedMeshSceneNode(smgr->getMesh("C:/Users/USER/Desktop/irrlicht-1.8.3/media/gun.md2"), 0, IDFlag_IsPickable | IDFlag_IsHighlightable);
+	Gun->setPosition(core::vector3df(-90, -15, -140));
+	Gun->setScale(core::vector3df(1.6f));
+	Gun->setMaterialTexture(0, driver->getTexture("C:/Users/USER/Desktop/irrlicht-1.8.3/media/gun.jpg"));
+	Gun->setMaterialFlag(video::EMF_LIGHTING, false);
+	Gun->set(camera->getTarget());
+
+	*/
+
+	scene::ITriangleSelector* selector_zombie = 0;
+
+	//for (int i = 0; i < 3; i++) { selector_zombie[i] = 0; }
+	//create zombie and player
+	//Spawner *spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(-70, -50, -60), 6, 50);
+	Spawner *spawner = NULL;
+	Boss *boss = NULL;
+	//spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(69, 0, -58), 6, 50);
+	Player *player = new Player();
+
+
+
+	scene::IAnimatedMeshSceneNode* node_model = 0;
+
+	video::SMaterial material;
+	if (selector_wall)
+	{
+		scene::ISceneNodeAnimator* anim_wall = smgr->createCollisionResponseAnimator(
+			selector_wall, camera, core::vector3df(30, 50, 30),
+			core::vector3df(0, -10, 0), core::vector3df(0, 30, 0));
+		selector_wall->drop(); // As soon as we're done with the selector, drop it.
+		camera->addAnimator(anim_wall);
+		anim_wall->drop();  // And likewise, drop the animator when we're done referring to it.
+	}
+	selector_zombie = selector_wall;
+
+	// Add an MD2 node, which uses vertex-based animation.
+	scene::IAnimatedMesh *Faerie2_mesh;
+	scene::IAnimatedMeshSceneNode* Faerie2_node;
+
+	scene::ISceneNodeAnimator* Faerie2_anim =
+		smgr->createFlyStraightAnimator(core::vector3df(425, 366, 324),
+		core::vector3df(-16, 364, 318), 100, false);
+
+	Faerie2_mesh = smgr->getMesh("\game/faerie.md2");
+	Faerie2_node = smgr->addAnimatedMeshSceneNode(Faerie2_mesh);
+	Faerie2_node->setMaterialFlag(video::EMF_LIGHTING, false);
+	Faerie2_node->setFrameLoop(0, 25);
+	Faerie2_node->setAnimationSpeed(20);
+	Faerie2_node->setScale(core::vector3df(1.5f, 1.5f, 1.5f));
+	Faerie2_node->setMaterialTexture(0, driver->getTexture("\game/faerie2.bmp"));
+	Faerie2_node->setPosition(core::vector3df(425, 366, 324));
+	Faerie2_node->setRotation(core::vector3df(0, 180, 0));
+
+
+	// Add a light, so that the unselected nodes aren't completely dark.
+	scene::ILightSceneNode * light = smgr->addLightSceneNode(0, core::vector3df(-60, 100, 400),
+		video::SColorf(1.0f, 1.0f, 1.0f, 1.0f), 600.0f);
+	light->setID(ID_IsNotPickable); // Make it an invalid target for selection.
+
+	// Remember which scene node is highlighted
+	scene::ISceneNode* highlightedSceneNode = 0;
+	scene::ISceneCollisionManager* collMan = smgr->getSceneCollisionManager();
+	int lastFPS = -1;
+
+	// draw the selection triangle only as wireframe
+	material.Wireframe = true;
+
+	//mouse movement
+	scene::ISceneNode * node_mouse = smgr->addMeshSceneNode(
+		smgr->addArrowMesh("Arrow",
+		video::SColor(255, 255, 0, 0),
+		video::SColor(255, 0, 255, 0),
+		16, 16,
+		0.f, 0.f,
+		0.f, 0.f
+		)
+		);
+
+	node_mouse->setMaterialFlag(video::EMF_LIGHTING, false);
+
+	//scene::ICameraSceneNode * camera = smgr->addCameraSceneNode();
+	//camera->setPosition(core::vector3df(0, 0, -10));
+
+	//bool blood[25];
+	for (int i = 0; i < 25; i++) blood[i] = 1;
+	for (int i = 0; i < 25; i++) bullet[i] = 1;
+	//smgr->addCameraSceneNodeFPS();
+	device->getCursorControl()->setVisible(false);
+	device->getGUIEnvironment()->clear();
+
+	gui::IGUIEnvironment* irrGUIEnv = device->getGUIEnvironment();
+
+	//irrGUIEnv->addStaticText(L"Krneki");
+
+
+	gui::IGUIStaticText* diagnostics = device->getGUIEnvironment()->addStaticText(
+		L"", core::rect<s32>(10, 10, 400, 20));
+	diagnostics->setOverrideColor(video::SColor(255, 255, 255, 0));
+
+	// In order to do framerate independent movement, we have to know
+	// how long it was since the last frame
+	ILogger* logger = device->getLogger();
+
+	u32 then = device->getTimer()->getTime();
+
+	char *Route1 = NULL, *Route21 = NULL, *Route22 = NULL, *Route31 = NULL, *Route32 = NULL, *Route41 = NULL, *Route42 = NULL, *Route51 = NULL, *Route52 = NULL, *RouteEnd = NULL;
+	int case1 = 1, case21 = 1, case22 = 1, case31 = 1, case32 = 1, case41 = 1, case42 = 1, case51 = 1, case52 = 1, caseEnd = 1;
+	int spawner1 = 0, spawner21 = 0, spawner22 = 0, spawner31 = 0, spawner32 = 0, spawner41 = 0, spawner42 = 0, spawner51 = 0, spawner52 = 0;
+	bool firstcome = 1;
+
+	scene::IParticleSystemSceneNode* ps = smgr->addParticleSystemSceneNode(false);
+	scene::IParticleEmitter* em = ps->createBoxEmitter(
+		core::aabbox3d<f32>(-1, 0, -1, 1, 1, 1), // emitter size
+		core::vector3df(0.0f, 0.1f, 0.0f),   // initial direction
+		10000, 10000,                             // emit rate
+		video::SColor(255, 255, 0, 0),       // darkest color
+		video::SColor(255, 255, 0, 0),       // brightest color
+		100, 100, 0,                         // min and max age, angle
+		core::dimension2df(10.f, 10.f),         // min size
+		core::dimension2df(50.f, 50.f));        // max size
+
+	scene::IParticleEmitter* em2 = ps->createBoxEmitter(
+		core::aabbox3d<f32>(0, 0, 0, 0, 0, 0), // emitter size
+		core::vector3df(0.0f, 0.1f, 0.0f),   // initial direction
+		0, 0,                             // emit rate
+		video::SColor(0, 255, 255, 255),       // darkest color
+		video::SColor(0, 255, 255, 255),       // brightest color
+		0, 0, 0,                         // min and max age, angle
+		core::dimension2df(0.f, 0.f),         // min size
+		core::dimension2df(0.f, 0.f));        // max size
+
+
+	scene::IParticleAffector* paf = ps->createFadeOutParticleAffector();
+	ps->setPosition(core::vector3df(-70, 60, 40));
+	ps->setScale(core::vector3df(2, 2, 2));
+	ps->setMaterialFlag(video::EMF_LIGHTING, false);
+	ps->setMaterialFlag(video::EMF_ZWRITE_ENABLE, false);
+	ps->setMaterialTexture(0, driver->getTexture("\game/fireball.bmp"));
+	ps->setMaterialType(video::EMT_TRANSPARENT_ADD_COLOR);
+
+
+	fstream fin;
+	engine->play2D("\game/BGM.wav");
+	while (device->run())
+	{
+		/////////////////////////////////////////////////////////////////////////////////////////
+		core::line3d<f32> ray = smgr->getSceneCollisionManager()->getRayFromScreenCoordinates(
+			hotkey.GetMouseState().Position, camera);
+
+		// Tracks the current intersection point with the level or a mesh
+		core::vector3df intersection;
+		// Used to show with triangle has been hit
+		core::triangle3df hitTriangle;
+		scene::ISceneNode * selectedSceneNode =
+			collMan->getSceneNodeAndCollisionPointFromRay(
+			ray,
+			intersection, // This will be the position of the collision
+			hitTriangle, // This will be the triangle hit in the collision
+			IDFlag_IsPickable, // This ensures that only nodes that we have
+			// set up to be pickable are considered
+			0); // Check the entire scene (this is actually the implicit default);
+		/////////////////////////////////////////////////////////////////////////////////////////
+
+		// Work out a frame delta time.
+		const u32 now = device->getTimer()->getTime();
+		const f32 frameDeltaTime = (f32)(now - then) / 1000.f; // Time in seconds
+		then = now;
+
+		//Movement(device, hotkey, camera, frameDeltaTime, selectedSceneNode, logger);
+		device->getGUIEnvironment()->clear();
+		Shot(hotkey, engine, frameDeltaTime, intersection, ps, em, em2, paf);
+		player->ShowHP(device, driver);
+		player->Die(device);
+		//////////////////////
+		bool movedWithJoystick = false;
+
+		if (case1 == 1) {
+			if (firstcome == 1) {
+				Route1 = new char[1940];
+				fin.open("\game/route1.txt", ios::in);
+				fin.getline(Route1, 1940, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			case1 = route(device, hotkey, camera, Route1, 1940);
+		}
+		else if (case1 == 0) {
+			delete[]Route1;
+			case1 = -1;
+			firstcome = 1;
+		}
+		else if (case1 == -1) {
+			if (spawner1 == 0) {
+				spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(28, -46, -78), 6, 50, q3node);
+				spawner1++;
+			}
+			else if (spawner1 != 0) {
+				for (int i = 0; i < 6; i++) {
+					if (spawner->getZombie(i) != NULL)
+					{
+						spawner->getZombie(i)->Movement(camera);
+						//spawner->getZombie(i)->setRotation(camera);
+					}
+
+				}
+				attackAI(spawner, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie, 6);
+				for (int i = 0; i < 6; i++) {
+					if (spawner->getZombie(i) != NULL) break;
+					else if (i == 5) {
+						case1 = -2;
+					}
+				}
+			}
+		}
+		else if (case21 == 1) {
+			if (firstcome == 1) {
+				Route21 = new char[2665];
+				fin.open("\game/route21.txt", ios::in);
+				fin.getline(Route21, 2665, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			case21 = route(device, hotkey, camera, Route21, 2665);
+		}
+		else if (case21 == 0) {
+			delete[]Route21;
+			case21 = -1;
+			firstcome = 1;
+		}
+		else if (case21 == -1) {
+			if (spawner21 == 0) {
+				delete spawner;
+				spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(164, 146, -969), 5, 50, q3node);
+				spawner21++;
+			}
+			else if (spawner21 != 0) {
+				for (int i = 0; i < 5; i++) {
+					if (spawner->getZombie(i) != NULL) spawner->getZombie(i)->Movement(camera);
+				}
+				attackAI(spawner, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie, 5);
+				for (int i = 0; i < 5; i++) {
+					if (spawner->getZombie(i) != NULL) break;
+					else if (i == 4) {
+						case21 = -2;
+					}
+				}
+			}
+		}
+		else if (case22 == 1) {
+			if (firstcome == 1) {
+				Route22 = new char[687];
+				fin.open("\game/route22.txt", ios::in);
+				fin.getline(Route22, 687, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			case22 = route(device, hotkey, camera, Route22, 687);
+		}
+		else if (case22 == 0) {
+			delete[]Route22;
+			case22 = -1;
+			firstcome = 1;
+		}
+		else if (case22 == -1) {
+			if (spawner22 == 0) {
+				delete spawner;
+				spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(-160, 146, -992), 1, 50, q3node);
+				spawner22++;
+			}
+			else if (spawner22 != 0) {
+				for (int i = 0; i < 1; i++) {
+					if (spawner->getZombie(i) != NULL) spawner->getZombie(i)->Movement(camera);
+				}
+				attackAI(spawner, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie, 1);
+				for (int i = 0; i < 1; i++) {
+					if (spawner->getZombie(i) != NULL) break;
+					else if (i == 0) {
+						case22 = -2;
+					}
+				}
+			}
+		}
+		else if (case31 == 1) {
+			if (firstcome == 1) {
+				Route31 = new char[2229];
+				fin.open("\game/route31.txt", ios::in);
+				fin.getline(Route31, 2229, '\n');
+				fin.close();
+				firstcome == 0;
+			}
+			case31 = route(device, hotkey, camera, Route31, 2229);
+		}
+		else if (case31 == 0) {
+			delete[]Route31;
+			case31 = -1;
+			firstcome = 1;
+		}
+		else if (case31 == -1) {
+			if (spawner31 == 0) {
+				delete spawner;
+				spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(-543, 82, -408), 5, 50, q3node);
+				spawner31++;
+			}
+			else if (spawner31 != 0) {
+				for (int i = 0; i < 5; i++) {
+					if (spawner->getZombie(i) != NULL) spawner->getZombie(i)->Movement(camera);
+				}
+				attackAI(spawner, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie, 5);
+				for (int i = 0; i < 5; i++) {
+					if (spawner->getZombie(i) != NULL) break;
+					else if (i == 4) {
+						case31 = -2;
+					}
+				}
+			}
+		}
+		else if (case32 == 1) {
+			if (firstcome == 1) {
+				Route32 = new char[1980];
+				fin.open("\game/route32.txt", ios::in);
+				fin.getline(Route32, 1980, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			case32 = route(device, hotkey, camera, Route32, 1980);
+		}
+		else if (case32 == 0) {
+			delete[]Route32;
+			case32 = -1;
+			firstcome = 1;
+		}
+		else if (case32 == -1) {
+			if (spawner32 == 0) {
+				delete spawner;
+				spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(114, 82, 765), 4, 50, q3node);
+				spawner32++;
+			}
+			else if (spawner32 != 0) {
+				for (int i = 0; i < 4; i++) {
+					if (spawner->getZombie(i) != NULL) spawner->getZombie(i)->Movement(camera);
+				}
+				attackAI(spawner, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie, 4);
+				for (int i = 0; i < 4; i++) {
+					if (spawner->getZombie(i) != NULL) break;
+					else if (i == 3) {
+						case32 = -2;
+					}
+				}
+			}
+		}
+		else if (case41 == 1) {
+			if (firstcome == 1){
+				Route41 = new char[1823];
+				fin.open("\game/route41.txt", ios::in);
+				fin.getline(Route41, 1823, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			case41 = route(device, hotkey, camera, Route41, 1823);
+		}
+
+		else if (case41 == 0) {
+			delete[]Route41;
+			case41 = -1;
+			firstcome = 1;
+		}
+		else if (case41 == -1) {
+			if (spawner41 == 0) {
+				delete spawner;
+				spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(580, 82, 123), 5, 50, q3node);
+				spawner41++;
+			}
+			else if (spawner41 != 0) {
+				for (int i = 0; i < 5; i++) {
+					if (spawner->getZombie(i) != NULL) spawner->getZombie(i)->Movement(camera);
+				}
+				attackAI(spawner, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie, 5);
+				for (int i = 0; i < 5; i++) {
+					if (spawner->getZombie(i) != NULL) break;
+					else if (i == 4) {
+						case41 = -2;
+					}
+				}
+			}
+		}
+		else if (case42 == 1) {
+			if (firstcome == 1) {
+				Route42 = new char[2685];
+				fin.open("\game/route42.txt", ios::in);
+				fin.getline(Route42, 2685, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			case42 = route(device, hotkey, camera, Route42, 2685);
+		}
+		else if (case42 == 0) {
+			delete[]Route42;
+			case42 = -1;
+			firstcome = 1;
+		}
+		else if (case42 == -1) {
+			if (spawner42 == 0) {
+				delete spawner;
+				spawner = new Spawner(device, driver, smgr, selector_zombie, core::vector3df(561, 226, 775), 3, 50, q3node);
+				spawner42++;
+			}
+			else if (spawner42 != 0) {
+				for (int i = 0; i < 3; i++) {
+					if (spawner->getZombie(i) != NULL) spawner->getZombie(i)->Movement(camera);
+				}
+				attackAI(spawner, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie, 3);
+				for (int i = 0; i < 3; i++) {
+					if (spawner->getZombie(i) != NULL) break;
+					else if (i == 2) {
+						case42 = -2;
+					}
+				}
+			}
+		}
+		else if (case51 == 1) {
+			if (firstcome == 1) {
+				Route51 = new char[926];
+				fin.open("\game/route51.txt", ios::in);
+				fin.getline(Route51, 926, '\n');
+				fin.close();
+				firstcome = 0;
+				Faerie2_node->addAnimator(Faerie2_anim);
+			}
+			case51 = route(device, hotkey, camera, Route51, 926);
+		}
+		else if (case51 == 0) {
+			delete[]Route51;
+			case51 = -1;
+			firstcome = 1;
+		}
+		else if (case51 == -1) {
+			if (spawner51 == 0) {
+				delete spawner;
+				boss = new Boss(driver, smgr, selector_zombie, core::vector3df(599, 306, 65));
+				spawner51++;
+			}
+			else if (spawner51 != 0) {
+				if (bosscheck == 1) {
+					//boss->Movement(camera);
+					boss->ShowHP(device, driver);
+					boss->setRotation(camera);
+					attackAIOfBoss(boss, intersection, selectedSceneNode, player, camera, device, driver, material, hitTriangle, hotkey, smgr, selector_zombie);
+
+				}
+
+				else {
+					case51 = -2;
+				}
+			}
+
+		}
+
+		else if (case52 == 1) {
+			if (firstcome == 1) {
+				Route52 = new char[640];
+				fin.open("\game/route52.txt", ios::in);
+				fin.getline(Route52, 640, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			case52 = route(device, hotkey, camera, Route52, 640);
+		}
+		else if (case52 == 0) {
+			delete[]Route52;
+			case52 = -1;
+			firstcome = 1;
+		}
+
+		else if (caseEnd == 1) {
+			if (firstcome == 1) {
+				Faerie2_anim =
+					smgr->createFlyStraightAnimator(core::vector3df(453, 14, -50),
+					core::vector3df(453, 14, -50), 3500, false);
+				Faerie2_node->addAnimator(Faerie2_anim);
+				RouteEnd = new char[3582];
+				fin.open("\game/routeEnd.txt", ios::in);
+				fin.getline(RouteEnd, 3582, '\n');
+				fin.close();
+				firstcome = 0;
+			}
+			caseEnd = route(device, hotkey, camera, RouteEnd, 3582);
+		}
+		else if (caseEnd == 0) {
+			delete[]RouteEnd;
+			caseEnd = -1;
+			firstcome = 1;
+		}
+		if (caseEnd == -1)
+		{
+			device->getGUIEnvironment()->addImage(
+				driver->getTexture("\game/youwin.png"),
+				core::position2d<s32>(300, 200));
+		}
+
+		/*if (bullet[0] == 0 && (now % 150 == 0)) {
+		for (int i = 0; i < 25; i++) bullet[i] = 1;
+		}*/
+
+		for (int i = 0; i < 25; i++){
+			if (bullet[i] == 1) {
+				device->getGUIEnvironment()->addImage(
+					driver->getTexture("\game/bullet.png"),
+					core::position2d<s32>(10 + 11 * i, 550));
+			}
+		}
+
+		core::position2d<s32> position = hotkey.GetMouseState().Position;
+		position.X -= 28;
+		position.Y -= 22;
+		device->getGUIEnvironment()->addImage(driver->getTexture("\game/aim2.png"), position);
+
+		driver->beginScene(true, true, video::SColor(255, 113, 113, 133));
+
+		smgr->drawAll(); // draw the 3d scene
+		device->getGUIEnvironment()->drawAll(); // draw the gui environment (the logo)
+
+		driver->endScene();
+
+		int fps = driver->getFPS();
+
+
+		if (lastFPS != fps)
+		{
+			core::stringw tmp(L"Movement Example - Irrlicht Engine [");
+			tmp += driver->getName();
+			tmp += L"] fps: ";
+			tmp += fps;
+			tmp += "  ";
+			tmp += camera->getPosition().X;
+			tmp += "  ";
+			tmp += camera->getPosition().Y;
+			tmp += "  ";
+			tmp += camera->getPosition().Z;
+
+
+			device->setWindowCaption(tmp.c_str());
+			lastFPS = fps;
+		}
+		if (hotkey.IsKeyDown(irr::KEY_ESCAPE))
+			device->closeDevice();
+
+	}
+
+
+	device->drop();
+	return 0;
+}
+
+void Shot(HotKeyReceiver receiver, ISoundEngine* engine, const f32 frameDeltaTime, core::vector3df intersection, scene::IParticleSystemSceneNode* ps, scene::IParticleEmitter* em, scene::IParticleEmitter* em2, scene::IParticleAffector* paf)
+{
+	// This is the movemen speed in units per second.
+	const f32 MOVEMENT_SPEED = 5.f;
+	static double TimeToShot = 0;
+	static bool R = 0;
+	TimeToShot += frameDeltaTime;
+
+	if (receiver.MouseState.LeftButtonDown == true){
+		if (TimeToShot >= 0.05)
+		{
+			ps->setPosition(intersection);
+			ps->setEmitter(em); // this grabs the emitter
+			//em->drop(); // so we can drop it here without deleting it
+			ps->addAffector(paf); // same goes for the affector
+			for (int i = 25; i >= 0; i--) {
+				if (bullet[i] == 1) {
+					bullet[i] = 0;
+					engine->play2D("\game/SMG.wav");
+					bulletnumber--;
+					break;
+				}
+				if (TimeToShot >= 0.051)
+				{
+					ps->setEmitter(em2);
+					ps->createFadeOutParticleAffector();
+					TimeToShot = 0;
+				}
+
+			}
+
+		}
+	}
+	else if (receiver.MouseState.RightButtonDown == true || R == 1){
+		bulletnumber = 0;
+		if (TimeToShot >= 0.05)
+		{
+			if (R == 0)
+				engine->play2D("\game/RELOAD.wav");
+			//TimeToShot = 0;
+			R = 1;
+			if (TimeToShot >= 0.75)
+			{
+				for (int i = 0; i < 25; i++) { bullet[i] = 1; }
+				bulletnumber = 25;
+				TimeToShot = 0;
+				R = 0;
+			}
+		}
+		//TimeToShot = 0;
+
+
+	}
+}
+
+void Movement(IrrlichtDevice* device, HotKeyReceiver receiver, scene::ICameraSceneNode* camera, const f32 frameDeltaTime, scene::ISceneNode * selectedSceneNode, ILogger* logger)
+{
+
+	// This is the movemen speed in units per second.
+	const f32 MOVEMENT_SPEED = 15.f;
+
+	core::vector3df nodePosition = camera->getPosition();
+	core::vector3df nodeTarget = camera->getTarget();
+	core::vector3df Direction = (nodeTarget - nodePosition).normalize();
+
+	if (receiver.IsKeyDown(irr::KEY_KEY_W)){
+		Direction.Y = 0;
+		Direction.normalize();
+
+		camera->setPosition(camera->getPosition() + Direction);
+		camera->setTarget(camera->getTarget() + Direction);
+		logger->log("W ");
+		//camera->updateAbsolutePosition();
+	}
+
+	else if (receiver.IsKeyDown(irr::KEY_KEY_S)){
+
+		Direction.Y = 0;
+		Direction.normalize();
+
+		camera->setPosition(camera->getPosition() - Direction);
+		camera->setTarget(camera->getTarget() - Direction);
+		//camera->updateAbsolutePosition();
+		logger->log("S ");
+	}
+
+	if (receiver.IsKeyDown(irr::KEY_KEY_A)){
+		core::vector3df crossvector = Direction.crossProduct(camera->getUpVector());
+		core::vector3df strafevector = crossvector.normalize();
+		camera->setTarget(camera->getTarget() + strafevector);
+		//camera->updateAbsolutePosition();
+		logger->log("A ");
+	}
+
+	else if (receiver.IsKeyDown(irr::KEY_KEY_D)){
+		core::vector3df crossvector = Direction.crossProduct(camera->getUpVector());
+		core::vector3df strafevector = crossvector.normalize();
+		camera->setTarget(camera->getTarget() - strafevector);
+		//camera->updateAbsolutePosition();
+		logger->log("D");
+
+	}
+}
+
+core::vector3df getXYDirection(core::vector3df start, core::vector3df end)
+{
+	f32 XYlength_reciprocal = core::reciprocal_squareroot((end.X - start.X) * (end.X - start.X) + (end.Y - start.Y) * (end.Y - start.Y));
+	core::vector3df XYDirection;
+	XYDirection.X = (end.X - start.X) * XYlength_reciprocal;
+	XYDirection.Y = (end.Y - start.Y) * XYlength_reciprocal;
+	XYDirection.Z = 0;
+
+	return XYDirection;
+}
+
+core::vector3df targetRotateToRight(core::vector3df Target, core::vector3df direction)
+{
+	core::vector3df orthogonalDirection;
+	orthogonalDirection.X = direction.Y;
+	orthogonalDirection.Y = 0;
+	orthogonalDirection.Z = -direction.X;
+
+	Target += orthogonalDirection;
+	return Target;
+
+}
+
+core::vector3df targetRotateToLeft(core::vector3df Target, core::vector3df direction)
+{
+
+	core::vector3df orthogonalDirection;
+	orthogonalDirection.X = -direction.Y;
+	orthogonalDirection.Y = 0;
+	orthogonalDirection.Z = direction.X;
+
+	Target += orthogonalDirection;
+	return Target;
+
+}
+
+int route(IrrlichtDevice* device, HotKeyReceiver receiver, scene::ICameraSceneNode* camera, char* route, int length)
+{
+	core::vector3df nodePosition = camera->getPosition();
+	core::vector3df nodeTarget = camera->getTarget();
+	core::vector3df Direction = (nodeTarget - nodePosition).normalize();
+	static int i = 0;
+
+	if (route[i] == 'W' && i <= length){
+		Direction.Y = 0;
+		Direction.normalize();
+
+		camera->setPosition(camera->getPosition() + Direction);
+		camera->setTarget(camera->getTarget() + Direction);
+		//camera->updateAbsolutePosition();
+	}
+
+	else if (route[i] == 'S' && i <= length){
+
+		Direction.Y = 0;
+		Direction.normalize();
+
+		camera->setPosition(camera->getPosition() - Direction);
+		camera->setTarget(camera->getTarget() - Direction);
+
+	}
+
+	if (route[i] == 'A' && i <= length){
+		core::vector3df crossvector = Direction.crossProduct(camera->getUpVector());
+		core::vector3df strafevector = crossvector.normalize();
+		camera->setTarget(camera->getTarget() + strafevector);
+
+	}
+
+	else if (route[i] == 'D' && i <= length){
+		core::vector3df crossvector = Direction.crossProduct(camera->getUpVector());
+		core::vector3df strafevector = crossvector.normalize();
+		camera->setTarget(camera->getTarget() - strafevector);
+		//camera->updateAbsolutePosition();
+
+	}
+	if (i <= length) {
+		i++;
+		return 1;
+	}
+	else {
+		i = 0;
+		return 0;
+	}
+}
+
+void attackAI(Spawner* spawner, core::vector3df intersection, scene::ISceneNode * selectedSceneNode, Player *player, scene::ICameraSceneNode* camera,
+	IrrlichtDevice *device, video::IVideoDriver  *driver, video::SMaterial material, core::triangle3df hitTriangle, HotKeyReceiver hotkey,
+	scene::ISceneManager *smgr, scene::ITriangleSelector* selector_zombie, int number){
+	//judge which zombie is attacked
+
+	float *dist = new float[number];
+	for (int i = 0; i < number; i++) dist[i] = 55555555;
+	for (int i = 0; i < number; i++) {
+		if (spawner->getZombie(i) != NULL)
+			dist[i] = (intersection - spawner->getZombie(i)->getPosition()).getLength();
+	}
+	int a = 0;
+	float min = dist[0];
+	for (int i = 1; i < number; i++) {
+		if (dist[i] < min) {
+			min = dist[i];
+			a = i;
+		}
+	}
+
+	scene::ISceneNode* highlightedSceneNode = 0;
+
+	if (highlightedSceneNode)
+	{
+		highlightedSceneNode->setMaterialFlag(video::EMF_LIGHTING, true);
+		highlightedSceneNode = 0;
+	}
+	// If the ray hit anything, move the billboard to the collision position
+	// and draw the triangle that was hit.
+	if (selectedSceneNode)
+	{
+		for (int i = 0; i < number; i++)
+		{
+			if (spawner->getZombie(i) != NULL)
+			{
+				//spawner->getZombie(i)->Movement(camera);
+				spawner->getZombie(i)->Attack(player, camera, device, driver);
+			}
+		}
+		// We need to reset the transform before doing our own rendering.
+		driver->setTransform(video::ETS_WORLD, core::matrix4());
+		driver->setMaterial(material);
+		driver->draw3DTriangle(hitTriangle, video::SColor(0, 255, 0, 0));
+
+		// We can check the flags for the scene node that was hit to see if it should be
+		// highlighted. The animated nodes can be highlighted, but not the Quake level mesh
+		if ((selectedSceneNode->getID() & IDFlag_IsHighlightable) == IDFlag_IsHighlightable)
+		{
+			// Highlighting in this case means turning lighting OFF for this node,
+			// which means that it will be drawn with full brightness.
+
+			if (hotkey.MouseState.LeftButtonDown == true && bulletnumber != 0){
+
+				if (spawner->getZombie(a) != NULL){
+					if (intersection.Y - spawner->getZombie(a)->getPosition().Y > 50) {
+						spawner->getZombie(a)->heavyPain(device, driver);
+					}
+					else spawner->getZombie(a)->Pain(device, driver);
+					if (spawner->getZombie(a)->GetHP() <= 0){
+						delete spawner->getZombie(a);
+						spawner->deleteZombie(a);
+					}
+
+					a = 0;
+				}
+			}
+		}
+
+	}
+}
+
+void attackAIOfBoss(Boss* boss, core::vector3df intersection, scene::ISceneNode * selectedSceneNode, Player *player, scene::ICameraSceneNode* camera,
+	IrrlichtDevice *device, video::IVideoDriver  *driver, video::SMaterial material, core::triangle3df hitTriangle, HotKeyReceiver hotkey,
+	scene::ISceneManager *smgr, scene::ITriangleSelector* selector_zombie){
+	//judge which zombie is attacked
+
+	scene::ISceneNode* highlightedSceneNode = 0;
+
+	if (highlightedSceneNode)
+	{
+		highlightedSceneNode->setMaterialFlag(video::EMF_LIGHTING, true);
+		highlightedSceneNode = 0;
+	}
+	// If the ray hit anything, move the billboard to the collision position
+	// and draw the triangle that was hit.
+	if (selectedSceneNode)
+	{
+
+		if (bosscheck == 1)
+		{
+			//spawner->getZombie(i)->Movement(camera);
+			boss->Attack(player, camera, device, driver, hotkey);
+		}
+
+		// We need to reset the transform before doing our own rendering.
+		driver->setTransform(video::ETS_WORLD, core::matrix4());
+		driver->setMaterial(material);
+		driver->draw3DTriangle(hitTriangle, video::SColor(0, 255, 0, 0));
+
+		// We can check the flags for the scene node that was hit to see if it should be
+		// highlighted. The animated nodes can be highlighted, but not the Quake level mesh
+		if ((selectedSceneNode->getID() & IDFlag_IsHighlightable) == IDFlag_IsHighlightable)
+		{
+			// Highlighting in this case means turning lighting OFF for this node,
+			// which means that it will be drawn with full brightness.
+
+			if (hotkey.MouseState.LeftButtonDown == true && bulletnumber != 0){
+
+				if (bosscheck == 1){
+
+					boss->Pain(device, driver);
+					if (boss->GetHP() <= 0){
+						delete  boss;
+						boss = NULL;
+						bosscheck = 0;
+					}
+				}
+			}
+		}
+
+	}
+}
